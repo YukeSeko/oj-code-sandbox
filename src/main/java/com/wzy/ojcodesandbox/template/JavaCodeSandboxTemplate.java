@@ -3,10 +3,7 @@ package com.wzy.ojcodesandbox.template;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import com.wzy.ojcodesandbox.CodeSandbox;
-import com.wzy.ojcodesandbox.model.ExecuteCodeRequest;
-import com.wzy.ojcodesandbox.model.ExecuteCodeResponse;
-import com.wzy.ojcodesandbox.model.ExecuteMessage;
-import com.wzy.ojcodesandbox.model.JudgeInfo;
+import com.wzy.ojcodesandbox.model.*;
 import com.wzy.ojcodesandbox.utils.ProcessUtils;
 import lombok.extern.slf4j.Slf4j;
 
@@ -17,13 +14,15 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 模板方法模式：定义一个模板，其子类可以重写该方法下的所有方法，可以自定义实现。
+ * Java 代码沙箱模板方法的实现
  */
 @Slf4j
 public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
 
     private static final String GLOBAL_CODE_DIR_NAME = "tmpCode";
+
     private static final String GLOBAL_JAVA_CLASS_NAME = "Main.java";
+
     private static final long TIME_OUT = 5000L;
 
     @Override
@@ -32,20 +31,20 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
         String code = executeCodeRequest.getCode();
         String language = executeCodeRequest.getLanguage();
 
-        //1. 把用户的代码保存为文件
+//        1. 把用户的代码保存为文件
         File userCodeFile = saveCodeToFile(code);
 
-        //2. 编译代码，得到 class 文件
+//        2. 编译代码，得到 class 文件
         ExecuteMessage compileFileExecuteMessage = compileFile(userCodeFile);
         System.out.println(compileFileExecuteMessage);
 
-        //3. 执行代码，得到输出结果
+        // 3. 执行代码，得到输出结果
         List<ExecuteMessage> executeMessageList = runFile(userCodeFile, inputList);
 
-        //4. 收集整理输出结果
+//        4. 收集整理输出结果
         ExecuteCodeResponse outputResponse = getOutputResponse(executeMessageList);
 
-        //5. 文件清理
+//        5. 文件清理
         boolean b = deleteFile(userCodeFile);
         if (!b) {
             log.error("deleteFile error, userCodeFilePath = {}", userCodeFile.getAbsolutePath());
@@ -53,8 +52,10 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
         return outputResponse;
     }
 
+
     /**
      * 1. 把用户的代码保存为文件
+     *
      * @param code 用户代码
      * @return
      */
@@ -73,9 +74,9 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
         return userCodeFile;
     }
 
-
     /**
      * 2、编译代码
+     *
      * @param userCodeFile
      * @return
      */
@@ -89,13 +90,13 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
             }
             return executeMessage;
         } catch (Exception e) {
-//            return getErrorResponse(e);
             throw new RuntimeException(e);
         }
     }
 
     /**
      * 3、执行文件，获得执行结果列表
+     *
      * @param userCodeFile
      * @param inputList
      * @return
@@ -105,10 +106,12 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
 
         List<ExecuteMessage> executeMessageList = new ArrayList<>();
         for (String inputArgs : inputList) {
-//            String runCmd = String.format("java -Xmx256m -Dfile.encoding=UTF-8 -cp %s Main %s", userCodeParentPath, inputArgs);
             String runCmd = String.format("java -Xmx256m -Dfile.encoding=UTF-8 -cp %s Main %s", userCodeParentPath, inputArgs);
             try {
+                // 获取JVM的总内存大小
+                long beganMemory = getUsedMemory();
                 Process runProcess = Runtime.getRuntime().exec(runCmd);
+                long endMemory = getUsedMemory();
                 // 超时控制
                 new Thread(() -> {
                     try {
@@ -119,7 +122,8 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
                         throw new RuntimeException(e);
                     }
                 }).start();
-                ExecuteMessage executeMessage = ProcessUtils.runProcessAndGetMessage(runProcess, "运行");
+                ExecuteMessage executeMessage = ProcessUtils.runInteractProcessAndGetMessage(runProcess, inputArgs);
+                executeMessage.setMemory(endMemory > beganMemory ? endMemory - beganMemory : 0);
                 System.out.println(executeMessage);
                 executeMessageList.add(executeMessage);
             } catch (Exception e) {
@@ -131,6 +135,7 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
 
     /**
      * 4、获取输出结果
+     *
      * @param executeMessageList
      * @return
      */
@@ -139,6 +144,7 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
         List<String> outputList = new ArrayList<>();
         // 取用时最大值，便于判断是否超时
         long maxTime = 0;
+        long totalMemory = 0;
         for (ExecuteMessage executeMessage : executeMessageList) {
             String errorMessage = executeMessage.getErrorMessage();
             if (StrUtil.isNotBlank(errorMessage)) {
@@ -152,6 +158,10 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
             if (time != null) {
                 maxTime = Math.max(maxTime, time);
             }
+            Long memory = executeMessage.getMemory();
+            if (memory != null) {
+                totalMemory+=memory;
+            }
         }
         // 正常运行完成
         if (outputList.size() == executeMessageList.size()) {
@@ -160,14 +170,15 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
         executeCodeResponse.setOutputList(outputList);
         JudgeInfo judgeInfo = new JudgeInfo();
         judgeInfo.setTime(maxTime);
-        // 要借助第三方库来获取内存占用，非常麻烦，此处不做实现
-//        judgeInfo.setMemory();
+        judgeInfo.setMemory(totalMemory);
+        judgeInfo.setMessage(JudgeInfoMessageEnum.ACCEPTED.getText());
         executeCodeResponse.setJudgeInfo(judgeInfo);
         return executeCodeResponse;
     }
 
     /**
      * 5、删除文件
+     *
      * @param userCodeFile
      * @return
      */
@@ -198,4 +209,18 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
     }
 
 
+    /**
+     * 获取使用的内存大小
+     *
+     * @return
+     */
+    private Long getUsedMemory() {
+        long totalMemory = Runtime.getRuntime().totalMemory();
+
+        // 获取JVM的空闲内存大小
+        long freeMemory = Runtime.getRuntime().freeMemory();
+
+        // 获取JVM的已使用内存大小
+        return totalMemory - freeMemory;
+    }
 }

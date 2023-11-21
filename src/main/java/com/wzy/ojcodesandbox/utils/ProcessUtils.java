@@ -85,6 +85,9 @@ public class ProcessUtils {
         ExecuteMessage executeMessage = new ExecuteMessage();
 
         try {
+            executeMessage.setExitValue(0);
+            StopWatch stopWatch = new StopWatch();
+            stopWatch.start();
             // 向控制台输入程序
             OutputStream outputStream = runProcess.getOutputStream();
             OutputStreamWriter outputStreamWriter = new OutputStreamWriter(outputStream);
@@ -108,6 +111,8 @@ public class ProcessUtils {
             outputStreamWriter.close();
             outputStream.close();
             inputStream.close();
+            stopWatch.stop();
+            executeMessage.setTime(stopWatch.getLastTaskTimeMillis());
             runProcess.destroy();
         } catch (Exception e) {
             e.printStackTrace();
